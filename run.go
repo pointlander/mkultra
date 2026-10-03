@@ -173,9 +173,9 @@ func Sample(rng *rand.Rand, nodes *Node) *node {
 			case 0:
 				return leaf()
 			case 1:
-				return stem(Sample(rng, nodes.N[0]))
+				return stem(Sample(rng, nodes.N[1]))
 			case 2:
-				return fork(Sample(rng, nodes.N[1]), Sample(rng, nodes.N[2]))
+				return fork(Sample(rng, nodes.N[2]), Sample(rng, nodes.N[1]))
 			}
 			break
 		}
