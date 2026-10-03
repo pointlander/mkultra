@@ -192,7 +192,7 @@ func (n *node) Data() []byte {
 			d(n.kids[0], data)
 		} else if len(n.kids) == 2 {
 			*data = append(*data, 1)
-			d(n.kids[0], data)
+			d(n.kids[1], data)
 		}
 	}
 	data := []byte{}
