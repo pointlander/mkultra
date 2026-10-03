@@ -25,6 +25,7 @@ package main
 
 import (
 	"fmt"
+	"math/rand"
 	"strings"
 )
 
@@ -130,10 +131,69 @@ func booleans() (not, f, t *node) {
 	return not, f, t
 }
 
+// Node is a node in a tree
+type Node struct {
+	N [3]*Node
+	H uint64
+}
+
+// Nodes is a tree full of nodes
+func Nodes(depth int) *Node {
+	node := &Node{}
+	var add func(depth int, node *Node) *Node
+	add = func(depth int, node *Node) *Node {
+		if depth <= 0 {
+			return node
+		}
+		node.N[0] = &Node{H: 1}
+		add(depth-1, node.N[0])
+		node.N[1] = &Node{H: 1}
+		add(depth-1, node.N[1])
+		node.N[2] = &Node{H: 1}
+		add(depth-1, node.N[2])
+		return node
+	}
+	return add(depth, node)
+}
+
+// Sample samples from the node
+func Sample(rng *rand.Rand, nodes *Node) *node {
+	if nodes.N[0] == nil {
+		return leaf()
+	}
+	sum := uint64(0)
+	for _, n := range nodes.N {
+		sum += n.H
+	}
+	total, selected := uint64(0), uint64(rng.Intn(int(sum)))
+	for i, n := range nodes.N {
+		total += n.H
+		if selected < total {
+			switch i {
+			case 0:
+				return leaf()
+			case 1:
+				return stem(Sample(rng, nodes.N[0]))
+			case 2:
+				return fork(Sample(rng, nodes.N[1]), Sample(rng, nodes.N[2]))
+			}
+			break
+		}
+	}
+	return nil
+}
+
 func main() {
 	not, f, t := booleans()
 	// [[]] = true
 	fmt.Printf("apply(not, false) = %s\n", apply(not, f))
 	// [] = false
 	fmt.Printf("apply(not, true) = %s\n", apply(not, t))
+
+	n1, n2 := Nodes(8), Nodes(8)
+	rng := rand.New(rand.NewSource(1))
+	for range 32 {
+		a, b := Sample(rng, n1), Sample(rng, n2)
+		fmt.Println(apply(a, b))
+	}
 }
