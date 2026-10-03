@@ -175,12 +175,29 @@ func Sample(rng *rand.Rand, nodes *Node) *node {
 			case 1:
 				return stem(Sample(rng, nodes.N[1]))
 			case 2:
-				return fork(Sample(rng, nodes.N[2]), Sample(rng, nodes.N[1]))
+				return fork(Sample(rng, nodes.N[2]), Sample(rng, nodes.N[2]))
 			}
 			break
 		}
 	}
 	return nil
+}
+
+// Data generates data from the tree
+func (n *node) Data() []byte {
+	var d func(n *node, data *[]byte)
+	d = func(n *node, data *[]byte) {
+		if len(n.kids) == 1 {
+			*data = append(*data, 0)
+			d(n.kids[0], data)
+		} else if len(n.kids) == 2 {
+			*data = append(*data, 1)
+			d(n.kids[0], data)
+		}
+	}
+	data := []byte{}
+	d(n, &data)
+	return data
 }
 
 func main() {
@@ -194,6 +211,6 @@ func main() {
 	rng := rand.New(rand.NewSource(1))
 	for range 32 {
 		a, b := Sample(rng, n1), Sample(rng, n2)
-		fmt.Println(apply(a, b))
+		fmt.Println(apply(a, b).Data())
 	}
 }
