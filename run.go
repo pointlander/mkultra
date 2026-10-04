@@ -31,7 +31,8 @@ import (
 
 // A node is one tree. An empty kids slice is the leaf △.
 type node struct {
-	kids []*node
+	kids   []*node
+	source *Node
 }
 
 func leaf() *node { return &node{} }
@@ -77,13 +78,13 @@ func (n *node) writeTo(b *strings.Builder) {
 
 // apply reduces fun applied to arg. fun and arg are not modified.
 // Subtrees may be shared with the result the same way as in run.js.
-func apply(fun, arg *node) *node {
+func apply(fun, arg *node, fuel int) *node {
 	expression := &node{kids: make([]*node, 0, 1+len(fun.kids))}
 	expression.push(arg)
 	expression.pushKids(fun)
 
-	todo := []*node{expression}
-	for len(todo) > 0 {
+	todo, count := []*node{expression}, 0
+	for len(todo) > 0 && count < fuel {
 		f := todo[len(todo)-1]
 		todo = todo[:len(todo)-1]
 		if len(f.kids) < 3 {
@@ -119,6 +120,7 @@ func apply(fun, arg *node) *node {
 		default:
 			// a is not a value. run.js drops this redex.
 		}
+		count++
 	}
 	return expression
 }
@@ -171,11 +173,17 @@ func Sample(rng *rand.Rand, nodes *Node) *node {
 		if selected < total {
 			switch i {
 			case 0:
-				return leaf()
+				k := leaf()
+				k.source = n
+				return k
 			case 1:
-				return stem(Sample(rng, nodes.N[1]))
+				k := stem(Sample(rng, nodes.N[1]))
+				k.source = n
+				return k
 			case 2:
-				return fork(Sample(rng, nodes.N[2]), Sample(rng, nodes.N[2]))
+				k := fork(Sample(rng, nodes.N[2]), Sample(rng, nodes.N[2]))
+				k.source = n
+				return k
 			}
 			break
 		}
@@ -200,17 +208,58 @@ func (n *node) Data() []byte {
 	return data
 }
 
+func (n *node) Update(score uint64) {
+	if n == nil {
+		return
+	}
+	if n.source != nil {
+		fmt.Println("here")
+		n.source.H += score
+	} else {
+		fmt.Println("there")
+	}
+	for _, n := range n.kids {
+		n.Update(score)
+	}
+}
+
 func main() {
 	not, f, t := booleans()
 	// [[]] = true
-	fmt.Printf("apply(not, false) = %s\n", apply(not, f))
+	fmt.Printf("apply(not, false) = %s\n", apply(not, f, 1000))
 	// [] = false
-	fmt.Printf("apply(not, true) = %s\n", apply(not, t))
+	fmt.Printf("apply(not, true) = %s\n", apply(not, t, 1000))
 
-	n1, n2 := Nodes(8), Nodes(8)
+	target := []byte{1, 0, 0, 1, 0, 0, 1, 0, 0, 1}
+	n1, n2 := Nodes(10), Nodes(10)
 	rng := rand.New(rand.NewSource(1))
-	for range 32 {
-		a, b := Sample(rng, n1), Sample(rng, n2)
-		fmt.Println(apply(a, b).Data())
+	epoch := 0
+search:
+	for {
+		a, b := make([]*node, 0, 8), make([]*node, 0, 8)
+		for range 32 {
+			a = append(a, Sample(rng, n1))
+			b = append(b, Sample(rng, n2))
+		}
+		for i := range a {
+			guess := apply(a[i], b[i], 1000).Data()
+			count := uint64(0)
+			for i, v := range target {
+				if i >= len(guess) {
+					break
+				}
+				if guess[i] == v {
+					count++
+				}
+			}
+			fmt.Println(count, guess)
+			if count == uint64(len(target)) {
+				break search
+			}
+			//a[i].Update(count)
+			//b[i].Update(count)
+		}
+		epoch++
 	}
+	fmt.Println(epoch)
 }

@@ -11,17 +11,17 @@ func TestNot(t *testing.T) {
 	if got := not.String(); got != "[[],[[[],[]],[[]]]]" {
 		t.Fatalf("not = %s", got)
 	}
-	if got := apply(not, f).String(); got != "[[]]" {
+	if got := apply(not, f, 1000).String(); got != "[[]]" {
 		t.Fatalf("not false = %s, want [[]]", got)
 	}
-	if got := apply(not, tru).String(); got != "[]" {
+	if got := apply(not, tru, 1000).String(); got != "[]" {
 		t.Fatalf("not true = %s, want []", got)
 	}
 	// The same trees can be applied again, as in run.js.
-	if got := apply(not, f).String(); got != "[[]]" {
+	if got := apply(not, f, 1000).String(); got != "[[]]" {
 		t.Fatalf("not false again = %s, want [[]]", got)
 	}
-	if got := apply(not, apply(not, f)).String(); got != "[]" {
+	if got := apply(not, apply(not, f, 1000), 1000).String(); got != "[]" {
 		t.Fatalf("not (not false) = %s, want []", got)
 	}
 }
@@ -29,8 +29,8 @@ func TestNot(t *testing.T) {
 func TestInputsNotMutated(t *testing.T) {
 	not, f, tru := booleans()
 	beforeNot, beforeF, beforeT := not.String(), f.String(), tru.String()
-	_ = apply(not, f)
-	_ = apply(not, tru)
+	_ = apply(not, f, 1000)
+	_ = apply(not, tru, 1000)
 	if not.String() != beforeNot || f.String() != beforeF || tru.String() != beforeT {
 		t.Fatalf("apply mutated an input: not %s f %s t %s", not, f, tru)
 	}
@@ -52,42 +52,42 @@ func TestRules(t *testing.T) {
 	}{
 		{
 			name: "absorb-leaf",
-			got:  apply(leaf(), y),
+			got:  apply(leaf(), y, 1000),
 			want: "[[[],[]]]",
 		},
 		{
 			name: "absorb-stem",
-			got:  apply(stem(x), y),
+			got:  apply(stem(x), y, 1000),
 			want: "[[[],[]],[[],[[]]]]",
 		},
 		{
 			name: "K",
 			// △ △ y z → y
-			got:  apply(apply(stem(leaf()), y), z),
+			got:  apply(apply(stem(leaf()), y, 1000), z, 1000),
 			want: "[[],[]]",
 		},
 		{
 			name: "rule2",
 			// △ (△ △) △ △ → △ △ (△ △)
-			got:  apply(apply(stem(stem(leaf())), leaf()), leaf()),
+			got:  apply(apply(stem(stem(leaf())), leaf(), 1000), leaf(), 1000),
 			want: "[[[]],[]]",
 		},
 		{
 			name: "rule3a",
 			// △ (△ w x) y △ → w
-			got:  apply(fork(fork(w, x), y), leaf()),
+			got:  apply(fork(fork(w, x), y), leaf(), 1000),
 			want: "[[]]",
 		},
 		{
 			name: "rule3b",
 			// △ (△ w x) y (△ u) → x u = △ △ (△ △)
-			got:  apply(fork(fork(w, x), y), stem(u)),
+			got:  apply(fork(fork(w, x), y), stem(u), 1000),
 			want: "[[[]],[]]",
 		},
 		{
 			name: "rule3c",
 			// △ (△ w x) y (△ u v) → y u v = △ (△ (△ △))
-			got:  apply(fork(fork(w, x), y), fork(u, v)),
+			got:  apply(fork(fork(w, x), y), fork(u, v), 1000),
 			want: "[[[[]]]]",
 		},
 	}
@@ -196,7 +196,7 @@ func TestMatchesOracle(t *testing.T) {
 	for _, fun := range vals {
 		for _, arg := range vals {
 			want := applyVal(fun, arg).String()
-			got := apply(fun.tree(), arg.tree()).String()
+			got := apply(fun.tree(), arg.tree(), 1000).String()
 			if got != want {
 				t.Fatalf("apply %s %s = %s, oracle %s", fun, arg, got, want)
 			}
