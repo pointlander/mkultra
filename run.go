@@ -213,10 +213,7 @@ func (n *node) Update(score uint64) {
 		return
 	}
 	if n.source != nil {
-		fmt.Println("here")
 		n.source.H += score
-	} else {
-		fmt.Println("there")
 	}
 	for _, n := range n.kids {
 		n.Update(score)
@@ -241,6 +238,7 @@ search:
 			a = append(a, Sample(rng, n1))
 			b = append(b, Sample(rng, n2))
 		}
+		index, max := 0, uint64(0)
 		for i := range a {
 			guess := apply(a[i], b[i], 1000).Data()
 			count := uint64(0)
@@ -256,9 +254,12 @@ search:
 			if count == uint64(len(target)) {
 				break search
 			}
-			//a[i].Update(count)
-			//b[i].Update(count)
+			if count > max {
+				index, max = i, count
+			}
 		}
+		a[index].Update(max)
+		b[index].Update(max)
 		epoch++
 	}
 	fmt.Println(epoch)
