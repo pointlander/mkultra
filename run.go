@@ -200,6 +200,7 @@ func (n *node) Data() []byte {
 			d(n.kids[0], data)
 		} else if len(n.kids) == 2 {
 			*data = append(*data, 1)
+			d(n.kids[0], data)
 			d(n.kids[1], data)
 		}
 	}
@@ -220,6 +221,47 @@ func (n *node) Update(score uint64) {
 	}
 }
 
+func (n *node) Count() int {
+	count := 1
+	for _, n := range n.kids {
+		count += n.Count()
+	}
+	return count
+}
+
+// K implements k complexity
+func K(target []byte) int {
+	n1, n2 := Nodes(4), Nodes(4)
+	rng := rand.New(rand.NewSource(1))
+	epoch := 0
+	max := uint64(0)
+	for {
+		a := Sample(rng, n1)
+		b := Sample(rng, n2)
+		guess := apply(a, b, 1000).Data()
+		count := uint64(0)
+		for i, v := range target {
+			if i >= len(guess) {
+				break
+			}
+			if guess[i] == v {
+				count++
+			}
+		}
+		//fmt.Println(count, guess)
+		if count == uint64(len(target)) {
+			fmt.Println("epochs=", epoch)
+			return a.Count() + b.Count()
+		}
+		if count > max {
+			max = count
+			a.Update(max)
+			b.Update(max)
+		}
+		epoch++
+	}
+}
+
 func main() {
 	not, f, t := booleans()
 	// [[]] = true
@@ -228,39 +270,6 @@ func main() {
 	fmt.Printf("apply(not, true) = %s\n", apply(not, t, 1000))
 
 	target := []byte{1, 0, 0, 1, 0, 0, 1, 0, 0, 1}
-	n1, n2 := Nodes(10), Nodes(10)
-	rng := rand.New(rand.NewSource(1))
-	epoch := 0
-search:
-	for {
-		a, b := make([]*node, 0, 8), make([]*node, 0, 8)
-		for range 32 {
-			a = append(a, Sample(rng, n1))
-			b = append(b, Sample(rng, n2))
-		}
-		index, max := 0, uint64(0)
-		for i := range a {
-			guess := apply(a[i], b[i], 1000).Data()
-			count := uint64(0)
-			for i, v := range target {
-				if i >= len(guess) {
-					break
-				}
-				if guess[i] == v {
-					count++
-				}
-			}
-			fmt.Println(count, guess)
-			if count == uint64(len(target)) {
-				break search
-			}
-			if count > max {
-				index, max = i, count
-			}
-		}
-		a[index].Update(max)
-		b[index].Update(max)
-		epoch++
-	}
-	fmt.Println(epoch)
+	complexity := K(target)
+	fmt.Println("k=", complexity)
 }
