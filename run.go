@@ -383,4 +383,5 @@ func main() {
 		fmt.Printf("size %d quote %d apply(%s, %s) = %s\n",
 			h.size, quoteCost(h.data), h.fun.term(), h.arg.term(), formatData(h.data))
 	}
+	modelBook()
 }

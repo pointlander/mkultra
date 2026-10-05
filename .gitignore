@@ -1,0 +1,12 @@
+# go build, named after this directory
+/mkultra
+
+# go test -c, coverage profiles
+*.test
+*.out
+coverage.*
+*.coverprofile
+
+# workspace
+go.work
+go.work.sum
