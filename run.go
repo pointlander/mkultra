@@ -26,6 +26,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -62,6 +63,27 @@ func (n *node) String() string {
 	var b strings.Builder
 	n.writeTo(&b)
 	return b.String()
+}
+
+// term prints a value as △, △ a, or △ a b.
+func (n *node) term() string {
+	switch len(n.kids) {
+	case 0:
+		return "△"
+	case 1:
+		return "△ " + groupTerm(n.kids[0])
+	case 2:
+		return "△ " + groupTerm(n.kids[1]) + " " + groupTerm(n.kids[0])
+	default:
+		return n.String()
+	}
+}
+
+func groupTerm(n *node) string {
+	if len(n.kids) == 0 {
+		return "△"
+	}
+	return "(" + n.term() + ")"
 }
 
 func (n *node) writeTo(b *strings.Builder) {
@@ -194,6 +216,18 @@ func matches(n *node, target []byte) bool {
 	return bytes.Equal(n.Data(), target)
 }
 
+// quoteCost is the number of nodes in every value that serializes to data.
+// A fork writes 1, a stem writes 0, and the leaves make up the rest.
+func quoteCost(data []byte) int {
+	ones := 0
+	for _, b := range data {
+		if b == 1 {
+			ones++
+		}
+	}
+	return len(data) + ones + 1
+}
+
 // treesOf builds every tree of exactly n nodes from smaller trees.
 // A tree is a leaf, a stem of one child, or a fork of two children.
 func treesOf(n int, by [][]*node) []*node {
@@ -222,25 +256,12 @@ func K(target []byte) int {
 	return size
 }
 
-// smallest returns one minimum pair and its node count.
-func smallest(target []byte) (a, b *node, size int) {
-	const fuel = 1000
-	for _, bit := range target {
-		if bit > 1 {
-			return nil, nil, -1
-		}
-	}
-	// apply(△ △ spine, △) reproduces a spine value of this serialization.
-	// That pair is an upper bound on the size K has to search.
-	ones := 0
-	for _, bit := range target {
-		if bit == 1 {
-			ones++
-		}
-	}
-	limit := len(target) + ones + 4
-	if limit < 4 {
-		limit = 4
+// enumerate reduces every pair whose node counts sum to at most limit,
+// in order of increasing size. visit returns true to stop.
+// Outputs that are unfinished, or values larger than maxNodes, are skipped.
+func enumerate(limit, fuel, maxNodes int, visit func(fun, arg *node, total int, out *node) bool) {
+	if limit < 2 {
+		return
 	}
 	by := make([][]*node, limit)
 	by[1] = []*node{leaf()}
@@ -249,10 +270,15 @@ func smallest(target []byte) (a, b *node, size int) {
 			for _, fun := range by[sa] {
 				for _, arg := range by[total-sa] {
 					out, discarded := reduce(fun, arg, fuel)
-					if discarded || !matches(out, target) {
+					if discarded {
 						continue
 					}
-					return fun, arg, total
+					if _, ok := out.valueNodes(maxNodes); !ok {
+						continue
+					}
+					if visit(fun, arg, total, out) {
+						return
+					}
 				}
 			}
 		}
@@ -260,7 +286,87 @@ func smallest(target []byte) (a, b *node, size int) {
 			by[total] = treesOf(total, by)
 		}
 	}
-	return nil, nil, -1
+}
+
+// smallest returns one minimum pair and its node count.
+func smallest(target []byte) (fun, arg *node, size int) {
+	const fuel = 1000
+	for _, bit := range target {
+		if bit > 1 {
+			return nil, nil, -1
+		}
+	}
+	// apply(△ △ spine, △) reproduces a spine value of this serialization.
+	// That pair is an upper bound: quoteCost + 3.
+	limit := quoteCost(target) + 3
+	if limit < 4 {
+		limit = 4
+	}
+	size = -1
+	enumerate(limit, fuel, 2*len(target)+1, func(f, a *node, total int, out *node) bool {
+		if !bytes.Equal(out.Data(), target) {
+			return false
+		}
+		fun, arg, size = f, a, total
+		return true
+	})
+	return fun, arg, size
+}
+
+// program is a pair that reduces to data.
+type program struct {
+	fun, arg *node
+	size     int
+	data     []byte
+}
+
+// census records the smallest pair for every serialization produced by a
+// pair of at most limit nodes.
+func census(limit int) map[string]program {
+	const (
+		fuel     = 1000
+		maxNodes = 64
+	)
+	best := make(map[string]program)
+	enumerate(limit, fuel, maxNodes, func(fun, arg *node, total int, out *node) bool {
+		data := out.Data()
+		key := string(data)
+		if _, seen := best[key]; seen {
+			return false
+		}
+		best[key] = program{fun, arg, total, append([]byte(nil), data...)}
+		return false
+	})
+	return best
+}
+
+// compressing lists serializations whose smallest pair is smaller than
+// quoting the value. The list is ordered by program size, then by bytes.
+func compressing(limit int) []program {
+	var hits []program
+	for _, p := range census(limit) {
+		if p.size < quoteCost(p.data) {
+			hits = append(hits, p)
+		}
+	}
+	sort.Slice(hits, func(i, j int) bool {
+		if hits[i].size != hits[j].size {
+			return hits[i].size < hits[j].size
+		}
+		return bytes.Compare(hits[i].data, hits[j].data) < 0
+	})
+	return hits
+}
+
+func formatData(data []byte) string {
+	var b strings.Builder
+	for i, v := range data {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteByte('0' + v)
+	}
+	return b.String()
 }
 
 func main() {
@@ -272,4 +378,9 @@ func main() {
 
 	target := []byte{1, 0, 0, 1, 0, 0, 1, 0, 0, 1}
 	fmt.Println("k=", K(target))
+	fmt.Println("quote=", quoteCost(target))
+	for _, h := range compressing(11) {
+		fmt.Printf("size %d quote %d apply(%s, %s) = %s\n",
+			h.size, quoteCost(h.data), h.fun.term(), h.arg.term(), formatData(h.data))
+	}
 }

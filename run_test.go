@@ -218,6 +218,40 @@ func TestKExact(t *testing.T) {
 	if K([]byte{2}) != -1 {
 		t.Fatal("K of a byte outside {0,1} should be -1")
 	}
+	if quoteCost(target) != got {
+		t.Fatalf("quote = %d, K = %d", quoteCost(target), got)
+	}
+}
+
+func TestTerm(t *testing.T) {
+	if got := fork(stem(leaf()), leaf()).term(); got != "△ (△ △) △" {
+		t.Fatalf("term = %s", got)
+	}
+}
+
+func TestCompressing(t *testing.T) {
+	hits := compressing(11)
+	if len(hits) == 0 {
+		t.Fatal("expected a string shorter than its quote")
+	}
+	for i, h := range hits {
+		if h.size >= quoteCost(h.data) {
+			t.Fatalf("hit %d does not compress: size %d quote %d", i, h.size, quoteCost(h.data))
+		}
+		out := apply(h.fun, h.arg, 1000)
+		if !bytes.Equal(out.Data(), h.data) {
+			t.Fatalf("hit %d serializes to %v, stored %v", i, out.Data(), h.data)
+		}
+		if i > 0 {
+			prev := hits[i-1]
+			if prev.size > h.size || (prev.size == h.size && bytes.Compare(prev.data, h.data) > 0) {
+				t.Fatalf("hits not ordered at %d", i)
+			}
+		}
+	}
+	if K(hits[0].data) != hits[0].size {
+		t.Fatalf("K(%v) = %d, census %d", hits[0].data, K(hits[0].data), hits[0].size)
+	}
 }
 
 func TestMatchesOracle(t *testing.T) {
