@@ -4,7 +4,10 @@
 
 package main
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestNot(t *testing.T) {
 	not, f, tru := booleans()
@@ -182,6 +185,39 @@ func allVals(maxNodes int) [][]*val {
 		}
 	}
 	return out
+}
+
+func TestK(t *testing.T) {
+	// Minimum pair sizes, checked by enumerating every smaller pair.
+	cases := []struct {
+		target []byte
+		want   int
+	}{
+		{[]byte{0}, 2},    // apply(△, △) = △ △
+		{[]byte{0, 0}, 3}, // apply(△, △ △) = △ (△ △)
+		{[]byte{1}, 3},    // apply(△ △, △) = △ △ △
+		{nil, 4},          // apply(△ △ △, △) = △
+	}
+	for _, tc := range cases {
+		if got := K(tc.target); got != tc.want {
+			t.Errorf("K(%v) = %d, want %d", tc.target, got, tc.want)
+		}
+	}
+}
+
+func TestKExact(t *testing.T) {
+	target := []byte{1, 0, 0, 1, 0, 0, 1, 0, 0, 1}
+	fun, arg, got := smallest(target)
+	if got != 15 {
+		t.Fatalf("K(target) = %d, want 15", got)
+	}
+	out := apply(fun, arg, 1000)
+	if !bytes.Equal(out.Data(), target) {
+		t.Fatalf("witness serializes to %v", out.Data())
+	}
+	if K([]byte{2}) != -1 {
+		t.Fatal("K of a byte outside {0,1} should be -1")
+	}
 }
 
 func TestMatchesOracle(t *testing.T) {

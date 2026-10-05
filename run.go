@@ -24,15 +24,14 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
-	"math/rand"
 	"strings"
 )
 
 // A node is one tree. An empty kids slice is the leaf △.
 type node struct {
-	kids   []*node
-	source *Node
+	kids []*node
 }
 
 func leaf() *node { return &node{} }
@@ -79,16 +78,28 @@ func (n *node) writeTo(b *strings.Builder) {
 // apply reduces fun applied to arg. fun and arg are not modified.
 // Subtrees may be shared with the result the same way as in run.js.
 func apply(fun, arg *node, fuel int) *node {
-	expression := &node{kids: make([]*node, 0, 1+len(fun.kids))}
+	out, _ := reduce(fun, arg, fuel)
+	return out
+}
+
+// reduce is apply plus a flag that is true when a non-value was discarded
+// instead of contracted. Callers that need a real normal form skip those.
+// Reduction also stops after fuel contractions, or after fuel uses of the
+// duplicating rule. A stopped term can still contain a redex.
+func reduce(fun, arg *node, fuel int) (expression *node, discarded bool) {
+	expression = &node{kids: make([]*node, 0, 1+len(fun.kids))}
 	expression.push(arg)
 	expression.pushKids(fun)
 
-	todo, count := []*node{expression}, 0
+	todo, count, made := []*node{expression}, 0, 0
 	for len(todo) > 0 && count < fuel {
 		f := todo[len(todo)-1]
 		todo = todo[:len(todo)-1]
 		if len(f.kids) < 3 {
 			continue
+		}
+		if made >= fuel {
+			break
 		}
 		todo = append(todo, f)
 		a := f.pop()
@@ -98,6 +109,7 @@ func apply(fun, arg *node, fuel int) *node {
 		case 0: // △ △ b c → b
 			f.pushKids(b)
 		case 1: // △ (△ x) b c → x c (b c)
+			made++
 			newPotRedex := &node{kids: make([]*node, 0, 1+len(b.kids))}
 			newPotRedex.push(c)
 			newPotRedex.pushKids(b)
@@ -116,13 +128,15 @@ func apply(fun, arg *node, fuel int) *node {
 				f.pushKids(b)
 			default:
 				// c is not a value. run.js drops this redex.
+				discarded = true
 			}
 		default:
 			// a is not a value. run.js drops this redex.
+			discarded = true
 		}
 		count++
 	}
-	return expression
+	return expression, discarded
 }
 
 // booleans builds false = △, true = △ △, and not = △ (△ true (△ △ false)) △.
@@ -133,65 +147,8 @@ func booleans() (not, f, t *node) {
 	return not, f, t
 }
 
-// Node is a node in a tree
-type Node struct {
-	N [3]*Node
-	H uint64
-}
-
-// Nodes is a tree full of nodes
-func Nodes(depth int) *Node {
-	node := &Node{}
-	var add func(depth int, node *Node) *Node
-	add = func(depth int, node *Node) *Node {
-		if depth <= 0 {
-			return node
-		}
-		node.N[0] = &Node{H: 1}
-		add(depth-1, node.N[0])
-		node.N[1] = &Node{H: 1}
-		add(depth-1, node.N[1])
-		node.N[2] = &Node{H: 1}
-		add(depth-1, node.N[2])
-		return node
-	}
-	return add(depth, node)
-}
-
-// Sample samples from the node
-func Sample(rng *rand.Rand, nodes *Node) *node {
-	if nodes.N[0] == nil {
-		return leaf()
-	}
-	sum := uint64(0)
-	for _, n := range nodes.N {
-		sum += n.H
-	}
-	total, selected := uint64(0), uint64(rng.Intn(int(sum)))
-	for i, n := range nodes.N {
-		total += n.H
-		if selected < total {
-			switch i {
-			case 0:
-				k := leaf()
-				k.source = n
-				return k
-			case 1:
-				k := stem(Sample(rng, nodes.N[1]))
-				k.source = n
-				return k
-			case 2:
-				k := fork(Sample(rng, nodes.N[2]), Sample(rng, nodes.N[2]))
-				k.source = n
-				return k
-			}
-			break
-		}
-	}
-	return nil
-}
-
-// Data generates data from the tree
+// Data serializes a value in preorder: 0 is a stem, 1 is a fork.
+// Leaves write nothing. A node that is not a value writes nothing.
 func (n *node) Data() []byte {
 	var d func(n *node, data *[]byte)
 	d = func(n *node, data *[]byte) {
@@ -209,57 +166,101 @@ func (n *node) Data() []byte {
 	return data
 }
 
-func (n *node) Update(score uint64) {
-	if n == nil {
-		return
+// valueNodes reports whether n is a finished value of at most maxNodes
+// nodes, and returns that node count. A node with three or more children
+// is an unfinished redex.
+func (n *node) valueNodes(maxNodes int) (int, bool) {
+	if n == nil || maxNodes < 1 || len(n.kids) > 2 {
+		return 0, false
 	}
-	if n.source != nil {
-		n.source.H += score
+	total := 1
+	for _, k := range n.kids {
+		sub, ok := k.valueNodes(maxNodes - total)
+		if !ok {
+			return 0, false
+		}
+		total += sub
 	}
-	for _, n := range n.kids {
-		n.Update(score)
-	}
+	return total, true
 }
 
-func (n *node) Count() int {
-	count := 1
-	for _, n := range n.kids {
-		count += n.Count()
+// matches reports whether n is a finished value whose serialization is
+// exactly target. A value that emits len(target) bytes has at most
+// 2*len(target)+1 nodes, so anything larger is rejected early.
+func matches(n *node, target []byte) bool {
+	if _, ok := n.valueNodes(2*len(target) + 1); !ok {
+		return false
 	}
-	return count
+	return bytes.Equal(n.Data(), target)
 }
 
-// K implements k complexity
+// treesOf builds every tree of exactly n nodes from smaller trees.
+// A tree is a leaf, a stem of one child, or a fork of two children.
+func treesOf(n int, by [][]*node) []*node {
+	out := make([]*node, 0, len(by[n-1]))
+	for _, child := range by[n-1] {
+		out = append(out, stem(child))
+	}
+	for left := 1; left <= n-2; left++ {
+		right := n - 1 - left
+		for _, a := range by[left] {
+			for _, b := range by[right] {
+				out = append(out, fork(a, b))
+			}
+		}
+	}
+	return out
+}
+
+// K is the number of nodes in the smallest pair of trees whose application
+// reduces to a value that serializes to target. Pairs are enumerated in
+// order of increasing size, so the first exact match is a minimum.
+// Unfinished reductions are skipped. K returns -1 when target contains a
+// byte other than 0 or 1, or when no pair within the size bound works.
 func K(target []byte) int {
-	n1, n2 := Nodes(4), Nodes(4)
-	rng := rand.New(rand.NewSource(1))
-	epoch := 0
-	max := uint64(0)
-	for {
-		a := Sample(rng, n1)
-		b := Sample(rng, n2)
-		guess := apply(a, b, 1000).Data()
-		count := uint64(0)
-		for i, v := range target {
-			if i >= len(guess) {
-				break
-			}
-			if guess[i] == v {
-				count++
-			}
+	_, _, size := smallest(target)
+	return size
+}
+
+// smallest returns one minimum pair and its node count.
+func smallest(target []byte) (a, b *node, size int) {
+	const fuel = 1000
+	for _, bit := range target {
+		if bit > 1 {
+			return nil, nil, -1
 		}
-		//fmt.Println(count, guess)
-		if count == uint64(len(target)) {
-			fmt.Println("epochs=", epoch)
-			return a.Count() + b.Count()
-		}
-		if count > max {
-			max = count
-			a.Update(max)
-			b.Update(max)
-		}
-		epoch++
 	}
+	// apply(△ △ spine, △) reproduces a spine value of this serialization.
+	// That pair is an upper bound on the size K has to search.
+	ones := 0
+	for _, bit := range target {
+		if bit == 1 {
+			ones++
+		}
+	}
+	limit := len(target) + ones + 4
+	if limit < 4 {
+		limit = 4
+	}
+	by := make([][]*node, limit)
+	by[1] = []*node{leaf()}
+	for total := 2; total <= limit; total++ {
+		for sa := 1; sa < total; sa++ {
+			for _, fun := range by[sa] {
+				for _, arg := range by[total-sa] {
+					out, discarded := reduce(fun, arg, fuel)
+					if discarded || !matches(out, target) {
+						continue
+					}
+					return fun, arg, total
+				}
+			}
+		}
+		if total < limit {
+			by[total] = treesOf(total, by)
+		}
+	}
+	return nil, nil, -1
 }
 
 func main() {
@@ -270,6 +271,5 @@ func main() {
 	fmt.Printf("apply(not, true) = %s\n", apply(not, t, 1000))
 
 	target := []byte{1, 0, 0, 1, 0, 0, 1, 0, 0, 1}
-	complexity := K(target)
-	fmt.Println("k=", complexity)
+	fmt.Println("k=", K(target))
 }
